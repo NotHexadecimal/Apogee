@@ -1,0 +1,17 @@
+{
+  "name": "apogee",
+  "version": "1.0.0",
+  "description": "",
+  "main": "./ts/index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "compile": "watchify ./ts/index.ts -p [ tsify --noImplicitAny ] -o ./compiled.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "tsify": "^5.0.4",
+    "typescript": "^4.8.4",
+    "watchify": "^4.0.0"
+  }
+}
