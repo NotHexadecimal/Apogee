@@ -9,7 +9,21 @@ const state = {
   }
 };
 
-const resize = () => {
+const update = (dt: number): void => {
+
+};
+
+const draw = (): void => {
+  ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
+
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(state.canvas.width, state.canvas.height);
+  ctx.stroke();
+};
+
+// event handlers
+const resize = (): void => {
   canvas.width = window.innerWidth * pixelRatio;
   canvas.height = window.innerHeight * pixelRatio;
   canvas.style.width = `${window.innerWidth}px`;
@@ -19,18 +33,21 @@ const resize = () => {
   state.canvas.height = window.innerHeight;
 };
 
-const draw = () => {
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(state.canvas.width, state.canvas.height);
-  ctx.stroke();
-};
+addEventListener('resize', resize);
+resize();
 
-const resizeDraw = () => {
-  resize();
+// game loop
+let prevTime = 0;
+requestAnimationFrame((time: number) => {
+  prevTime = time;
+  requestAnimationFrame(loop);
+});
+const loop = (time: number) => {
+  const dt = time - prevTime;
+  prevTime = time;
+
+  update(dt);
   draw();
+
+  requestAnimationFrame(loop);
 };
-
-addEventListener('resize', resizeDraw);
-
-resizeDraw();
