@@ -62,7 +62,7 @@ impl Planet {
     pub fn position(&self) -> AbiPosition {
         AbiPosition {
             x: self.position.x,
-            y: self.position.y
+            y: self.position.y,
         }
     }
 }
@@ -78,7 +78,7 @@ impl Planet {
 #[wasm_bindgen]
 pub struct AbiPosition {
     pub x: f64,
-    pub y: f64
+    pub y: f64,
 }
 
 #[wasm_bindgen]
@@ -100,7 +100,7 @@ impl Craft {
     pub fn position(&self) -> AbiPosition {
         AbiPosition {
             x: self.position.x,
-            y: self.position.y
+            y: self.position.y,
         }
     }
 
@@ -117,12 +117,15 @@ impl Craft {
     }
 
     fn thrust_accel(&self) -> DVec2 {
+        if self.fuel_mass == 0.0 {
+            return DVec2::new(0.0, 0.0);
+        }
+
         let hdg: DVec2 = (self.heading as f64).sin_cos().into();
         let base_vec = DVec2::new((self.thrust * self.throttle) as f64, 0.0);
         let thrust = hdg.rotate(base_vec);
         thrust / self.mass()
     }
-
 
     /// Compute the consumed fuel from the expended delta-v in the given time
     fn consume_fuel(&mut self, time: f64) {
@@ -152,7 +155,7 @@ mod tests {
             thrust: 2000.0,
             throttle: 1.0,
             position: (0.0, 0.0).into(),
-            speed: (0.0, 0.0).into()
+            speed: (0.0, 0.0).into(),
         };
         craft.consume_fuel(0.5);
         assert!(craft.fuel_mass < 500.0)
@@ -168,7 +171,7 @@ mod tests {
             thrust: 2000.0,
             throttle: 1.0,
             position: (0.0, 0.0).into(),
-            speed: (0.0, 0.0).into()
+            speed: (0.0, 0.0).into(),
         };
         let dv_1 = craft.deltav();
         craft.consume_fuel(1.0);
