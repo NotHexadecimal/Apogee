@@ -5,7 +5,10 @@
   "main": "./ts/index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "compile": "watchify ./ts/index.ts -p [ tsify --noImplicitAny ] -o ./compiled.js"
+    "compile": "pushd physics
+	&& wasm-pack build --target web --release
+	&& popd
+	&& watchify ./ts/index.ts -p [ tsify --noImplicitAny ] -o ./compiled.js"
   },
   "author": "",
   "license": "ISC",
