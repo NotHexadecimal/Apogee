@@ -5,6 +5,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::console;
 
 const G: f64 = 6.67430e-11;
+const STANDARD_GRAVITY: f64 = 9.80665;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -21,7 +22,7 @@ pub fn main() {
 #[wasm_bindgen]
 #[derive(Clone, Copy)]
 pub struct Config {
-    pub tick_time: f32,
+    pub tick_time: f64,
     // TODO
     // pub precompute_ticks: u64,
 }
@@ -42,8 +43,9 @@ impl Simulation {
                 .iter()
                 .map(|p| p.gravity_accel_on(craft.position))
                 .fold(craft.thrust_accel(), |f1, f2| f1 + f2);
-            craft.speed += accel * self.cfg.tick_time as f64;
-            craft.position += craft.speed * self.cfg.tick_time as f64;
+            craft.speed += accel * self.cfg.tick_time;
+            craft.position += craft.speed * self.cfg.tick_time;
+            craft.consume_fuel(self.cfg.tick_time)
         }
     }
 }
@@ -83,8 +85,7 @@ pub struct AbiPosition {
 pub struct Craft {
     dry_mass: f32,
     fuel_mass: f32,
-    // TODO: deltav and fuel comsumption simulation
-    // isp: f32,
+    isp: f32,
     thrust: f32,
     position: DVec2,
     speed: DVec2,
@@ -102,6 +103,12 @@ impl Craft {
             y: self.position.y
         }
     }
+
+    pub fn deltav(&self) -> f64 {
+        let exhaust_vel = self.isp as f64 * STANDARD_GRAVITY;
+        let mass_ratio = self.mass() / self.dry_mass as f64;
+        exhaust_vel * mass_ratio.ln()
+    }
 }
 
 impl Craft {
@@ -114,5 +121,60 @@ impl Craft {
         let base_vec = DVec2::new((self.thrust * self.throttle) as f64, 0.0);
         let thrust = hdg.rotate(base_vec);
         thrust / self.mass()
+    }
+
+
+    /// Compute the consumed fuel from the expended delta-v in the given time
+    fn consume_fuel(&mut self, time: f64) {
+        // dv = isp * g * ln(m0/m1)
+        // ln(m0/m1) = dv / (isp * g)
+        // m0/m1 = e^(dv / (isp * g))
+        // m1 = m0 / e^(dv / (isp * g))
+        let dv = time * self.thrust as f64 * self.throttle as f64 / self.mass();
+        let exhaust_velocity = self.isp as f64 * STANDARD_GRAVITY;
+        let wet_final = self.mass() / std::f64::consts::E.powf(dv / exhaust_velocity);
+        let fuel = wet_final as f32 - self.dry_mass;
+        self.fuel_mass = if fuel > 0.0 { fuel } else { 0.0 };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Craft;
+
+    #[test]
+    fn fuel_comsumption() {
+        let mut craft = Craft {
+            dry_mass: 500.0,
+            fuel_mass: 500.0,
+            isp: 200.0,
+            heading: 0.0,
+            thrust: 2000.0,
+            throttle: 1.0,
+            position: (0.0, 0.0).into(),
+            speed: (0.0, 0.0).into()
+        };
+        craft.consume_fuel(0.5);
+        assert!(craft.fuel_mass < 500.0)
+    }
+
+    #[test]
+    fn deltav() {
+        let mut craft = Craft {
+            dry_mass: 500.0,
+            fuel_mass: 500.0,
+            isp: 200.0,
+            heading: 0.0,
+            thrust: 2000.0,
+            throttle: 1.0,
+            position: (0.0, 0.0).into(),
+            speed: (0.0, 0.0).into()
+        };
+        let dv_1 = craft.deltav();
+        craft.consume_fuel(1.0);
+        let dv_2 = craft.deltav();
+        let dv_diff = dv_1 - dv_2;
+        // i sure love testing for rounding errors
+        assert!(dbg!((dv_diff - 2.0).abs()) < 1e-4);
     }
 }
