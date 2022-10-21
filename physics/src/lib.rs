@@ -32,7 +32,10 @@ pub struct Config {
 impl Config {
     #[wasm_bindgen(constructor)]
     pub fn new(tick_time: f64, prediction_steps: u64) -> Self {
-        Self { tick_time, prediction_steps }
+        Self {
+            tick_time,
+            prediction_steps,
+        }
     }
 }
 
@@ -48,7 +51,10 @@ pub struct Simulation {
 impl Simulation {
     #[wasm_bindgen(constructor)]
     pub fn new(cfg: Config) -> Self {
-        Self { cfg, ..Default::default() }
+        Self {
+            cfg,
+            ..Default::default()
+        }
     }
 
     /// Adds a planet to the simulation and recomputes the ships' trajectory
@@ -66,7 +72,11 @@ impl Simulation {
     pub fn tick(&mut self) {
         for craft in self.crafts.iter_mut() {
             if craft.throttle == 0.0 {
-                craft.populate_trajectory(&self.planets, self.cfg.tick_time, self.cfg.prediction_steps + 1);
+                craft.populate_trajectory(
+                    &self.planets,
+                    self.cfg.tick_time,
+                    self.cfg.prediction_steps + 1,
+                );
                 (craft.speed, craft.position) = craft.trajectory.pop_front().unwrap().into();
             } else {
                 let accel: DVec2 = self
@@ -79,7 +89,11 @@ impl Simulation {
                 craft.consume_fuel(self.cfg.tick_time);
 
                 craft.trajectory.clear();
-                craft.populate_trajectory(&self.planets, self.cfg.tick_time, self.cfg.prediction_steps);
+                craft.populate_trajectory(
+                    &self.planets,
+                    self.cfg.tick_time,
+                    self.cfg.prediction_steps,
+                );
             }
         }
     }
@@ -109,7 +123,11 @@ pub struct Planet {
 impl Planet {
     #[wasm_bindgen(constructor)]
     pub fn new(mass: f32, radius: f32, pos: AbiDVec2) -> Self {
-        Self { mass, radius, position: pos.into() }
+        Self {
+            mass,
+            radius,
+            position: pos.into(),
+        }
     }
 
     #[wasm_bindgen(getter)]
@@ -141,7 +159,10 @@ impl From<DVec2> for AbiDVec2 {
 
 impl Into<DVec2> for AbiDVec2 {
     fn into(self) -> DVec2 {
-        DVec2 { x: self.x, y: self.y }
+        DVec2 {
+            x: self.x,
+            y: self.y,
+        }
     }
 }
 
@@ -158,7 +179,7 @@ impl Into<(DVec2, DVec2)> for VelPos {
     }
 }
 
-#[wasm_bindgen] 
+#[wasm_bindgen]
 #[derive(Debug, Default)]
 pub struct Craft {
     pub dry_mass: f32,
@@ -171,7 +192,7 @@ pub struct Craft {
     pub throttle: f32,
     // (speed, position)
     // I'd rather do without the AbiDVec2 conversions but glam doesn't do wasm_bindgen on its types
-    trajectory: VecDeque<VelPos>
+    trajectory: VecDeque<VelPos>,
 }
 
 #[wasm_bindgen]
@@ -211,7 +232,9 @@ impl Craft {
         self.trajectory.make_contiguous().as_ptr()
     }
 
-    pub fn trajectory_len(&self) -> usize { self.trajectory.len() }
+    pub fn trajectory_len(&self) -> usize {
+        self.trajectory.len()
+    }
 }
 
 impl Craft {
@@ -246,17 +269,21 @@ impl Craft {
     fn populate_trajectory(&mut self, planets: &[Planet], timestep: f64, len: u64) {
         let start = if let Some(vp) = self.trajectory.back() {
             (*vp).into()
-        } else { (self.speed, self.position) };
-        let iter = std::iter::successors(Some(start),
-            |(mut speed, position)| {
-                let accel: DVec2 = planets.iter()
-                    .map(|p| p.gravity_accel_on(*position))
-                    .fold((0.0, 0.0).into(), |a, b| a + b);
-                speed += accel * timestep;
-                Some((speed, *position + speed * timestep))
-            }
-        )
-        .map(|(vel, pos)| VelPos { vel: vel.into(), pos: pos.into() })
+        } else {
+            (self.speed, self.position)
+        };
+        let iter = std::iter::successors(Some(start), |(mut speed, position)| {
+            let accel: DVec2 = planets
+                .iter()
+                .map(|p| p.gravity_accel_on(*position))
+                .fold((0.0, 0.0).into(), |a, b| a + b);
+            speed += accel * timestep;
+            Some((speed, *position + speed * timestep))
+        })
+        .map(|(vel, pos)| VelPos {
+            vel: vel.into(),
+            pos: pos.into(),
+        })
         .take(len as usize - self.trajectory.len());
 
         self.trajectory.extend(iter);
@@ -280,7 +307,7 @@ mod tests {
             throttle: 1.0,
             position: (0.0, 0.0).into(),
             speed: (0.0, 0.0).into(),
-            trajectory: VecDeque::new()
+            trajectory: VecDeque::new(),
         };
         craft.consume_fuel(0.5);
         assert!(craft.fuel_mass < 500.0)
@@ -297,7 +324,7 @@ mod tests {
             throttle: 1.0,
             position: (0.0, 0.0).into(),
             speed: (0.0, 0.0).into(),
-            trajectory: VecDeque::new()
+            trajectory: VecDeque::new(),
         };
         let dv_1 = craft.deltav();
         craft.consume_fuel(1.0);
