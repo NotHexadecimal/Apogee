@@ -107,10 +107,12 @@ pub struct Planet {
 
 #[wasm_bindgen]
 impl Planet {
+    #[wasm_bindgen(constructor)]
     pub fn new(mass: f32, radius: f32, pos: AbiDVec2) -> Self {
         Self { mass, radius, position: pos.into() }
     }
 
+    #[wasm_bindgen(getter)]
     pub fn position(&self) -> AbiDVec2 {
         self.position.into()
     }
@@ -205,10 +207,11 @@ impl Craft {
         exhaust_vel * mass_ratio.ln()
     }
 
-    // #[wasm_bindgen(getter)]
-    // pub fn trajectory(&self) -> *const DVec2 {
-    //     self.trajectory.as_ptr()
-    // }
+    pub fn trajectory_ptr(&mut self) -> *const VelPos {
+        self.trajectory.make_contiguous().as_ptr()
+    }
+
+    pub fn trajectory_len(&self) -> usize { self.trajectory.len() }
 }
 
 impl Craft {
