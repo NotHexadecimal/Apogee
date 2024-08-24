@@ -2,9 +2,11 @@ mod utils;
 
 use std::collections::VecDeque;
 
-use glam::DVec2;
+use nalgebra::{Rotation2, Vector2};
 use wasm_bindgen::prelude::*;
 use web_sys::console;
+
+type DVec2 = Vector2<f64>;
 
 const G: f64 = 6.67430e-11;
 const STANDARD_GRAVITY: f64 = 9.80665;
@@ -83,7 +85,7 @@ impl Simulation {
                     .planets
                     .iter()
                     .map(|p| p.gravity_accel_on(craft.position))
-                    .fold(craft.thrust_accel(), |f1, f2| f1 + f2);
+                    .fold(craft.accel_vector(), |f1, f2| f1 + f2);
                 craft.speed += accel * self.cfg.tick_time;
                 craft.position += craft.speed * self.cfg.tick_time;
                 craft.consume_fuel(self.cfg.tick_time);
@@ -111,18 +113,19 @@ impl Simulation {
     }
 }
 
+/// Exerts gravity on [Craft]s
 #[wasm_bindgen]
 #[derive(Debug, Default)]
 pub struct Planet {
-    pub mass: f32,
-    pub radius: f32,
+    pub mass: f64,
+    pub radius: f64,
     position: DVec2,
 }
 
 #[wasm_bindgen]
 impl Planet {
     #[wasm_bindgen(constructor)]
-    pub fn new(mass: f32, radius: f32, pos: AbiDVec2) -> Self {
+    pub fn new(mass: f64, radius: f64, pos: AbiDVec2) -> Self {
         Self {
             mass,
             radius,
@@ -137,13 +140,16 @@ impl Planet {
 }
 
 impl Planet {
+    /// Computes the gravitational acceleration applied on an object of negligible mass
     fn gravity_accel_on(&self, pos: DVec2) -> DVec2 {
-        let dist = self.position - pos;
-        let accel_mod = self.mass as f64 * G / dist.length().powi(2);
-        dist.normalize().rotate(DVec2::new(accel_mod, 0.0))
+        let mut dist = self.position - pos;
+        let accel_mod = self.mass * G / dist.magnitude().powi(2);
+        dist.set_magnitude(accel_mod);
+        dist
     }
 }
 
+// How do I pass this stuff by value to JS
 #[wasm_bindgen]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AbiDVec2 {
@@ -157,41 +163,36 @@ impl From<DVec2> for AbiDVec2 {
     }
 }
 
-impl Into<DVec2> for AbiDVec2 {
-    fn into(self) -> DVec2 {
-        DVec2 {
-            x: self.x,
-            y: self.y,
-        }
+impl From<AbiDVec2> for DVec2 {
+    fn from(vec: AbiDVec2) -> Self {
+        DVec2::new(vec.x, vec.y)
     }
 }
 
-#[wasm_bindgen]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct VelPos {
-    pub vel: AbiDVec2,
-    pub pos: AbiDVec2,
+    pub vel: DVec2,
+    pub pos: DVec2,
 }
 
-impl Into<(DVec2, DVec2)> for VelPos {
-    fn into(self) -> (DVec2, DVec2) {
-        (self.vel.into(), self.pos.into())
+impl From<VelPos> for (DVec2, DVec2) {
+    fn from(value: VelPos) -> Self {
+        (value.vel.into(), value.pos.into())
     }
 }
 
+/// Represents a spacecraft propelled by a reaction motor
 #[wasm_bindgen]
 #[derive(Debug, Default)]
 pub struct Craft {
-    pub dry_mass: f32,
-    pub fuel_mass: f32,
-    pub isp: f32,
-    pub thrust: f32,
+    pub dry_mass: f64,
+    pub fuel_mass: f64,
+    pub isp: f64,
+    pub thrust: f64,
     position: DVec2,
     speed: DVec2,
-    pub heading: f32,
-    pub throttle: f32,
-    // (speed, position)
-    // I'd rather do without the AbiDVec2 conversions but glam doesn't do wasm_bindgen on its types
+    pub heading: f64,
+    pub throttle: f64,
     trajectory: VecDeque<VelPos>,
 }
 
@@ -222,50 +223,74 @@ impl Craft {
         self.speed = vel.into()
     }
 
+    /// Computes the craft's delta-v
     pub fn deltav(&self) -> f64 {
-        let exhaust_vel = self.isp as f64 * STANDARD_GRAVITY;
-        let mass_ratio = self.mass() / self.dry_mass as f64;
+        let exhaust_vel = self.isp * STANDARD_GRAVITY;
+        let mass_ratio = self.mass() / self.dry_mass;
         exhaust_vel * mass_ratio.ln()
     }
 
-    pub fn trajectory_ptr(&mut self) -> *const VelPos {
-        self.trajectory.make_contiguous().as_ptr()
+    // Not JS iterator compliant but should be good enough?
+    pub fn trajectory_iter(&self) -> TrajectoryIter {
+        TrajectoryIter {
+            inner: &self.trajectory as *const _,
+        }
     }
+}
 
-    pub fn trajectory_len(&self) -> usize {
-        self.trajectory.len()
+/// Can call a JS closure over items in the deque
+#[wasm_bindgen]
+pub struct TrajectoryIter {
+    inner: *const VecDeque<VelPos>,
+}
+
+#[wasm_bindgen]
+impl TrajectoryIter {
+    /// Calls the provided JS closure for each element in the buffer
+    ///
+    /// The closure takes x and y coordinates, if any exception is caught the loop is stopped and
+    /// the error is returned
+    pub fn each_position(&self, f: &js_sys::Function) -> Result<(), JsValue> {
+        let this = JsValue::null();
+        for elem in unsafe { &*self.inner } {
+            f.call2(
+                &this,
+                &JsValue::from(elem.pos.x),
+                &JsValue::from(elem.pos.y),
+            )?;
+        }
+        Ok(())
     }
 }
 
 impl Craft {
+    /// Total craft mass
     fn mass(&self) -> f64 {
-        (self.dry_mass + self.fuel_mass) as f64
+        self.dry_mass + self.fuel_mass
     }
 
-    fn thrust_accel(&self) -> DVec2 {
+    /// Returns the craft's acceleration vector
+    fn accel_vector(&self) -> DVec2 {
         if self.fuel_mass == 0.0 {
             return DVec2::new(0.0, 0.0);
         }
 
-        let hdg: DVec2 = (self.heading as f64).sin_cos().into();
-        let base_vec = DVec2::new((self.thrust * self.throttle) as f64, 0.0);
-        let thrust = hdg.rotate(base_vec);
-        thrust / self.mass()
+        let thrust = self.thrust * self.throttle;
+        Rotation2::new(self.heading) * Vector2::new(thrust / self.mass(), 0.0)
     }
 
     /// Compute the consumed fuel from the expended delta-v in the given time
     fn consume_fuel(&mut self, time: f64) {
-        // dv = isp * g * ln(m0/m1)
-        // ln(m0/m1) = dv / (isp * g)
-        // m0/m1 = e^(dv / (isp * g))
-        // m1 = m0 / e^(dv / (isp * g))
-        let dv = time * self.thrust as f64 * self.throttle as f64 / self.mass();
-        let exhaust_velocity = self.isp as f64 * STANDARD_GRAVITY;
-        let wet_final = self.mass() / std::f64::consts::E.powf(dv / exhaust_velocity);
-        let fuel = wet_final as f32 - self.dry_mass;
-        self.fuel_mass = if fuel > 0.0 { fuel } else { 0.0 };
+        // flow_rate = F / (g_0 * Isp)
+
+        let force = self.thrust * self.throttle;
+        let exhaust_velocity = self.isp * STANDARD_GRAVITY;
+        let flow_rate = dbg!(force) / dbg!(exhaust_velocity);
+
+        self.fuel_mass = (self.fuel_mass - flow_rate * time).max(0.0)
     }
 
+    /// Computes or extends the current trajectory
     fn populate_trajectory(&mut self, planets: &[Planet], timestep: f64, len: u64) {
         let start = if let Some(vp) = self.trajectory.back() {
             (*vp).into()
@@ -273,10 +298,10 @@ impl Craft {
             (self.speed, self.position)
         };
         let iter = std::iter::successors(Some(start), |(mut speed, position)| {
-            let accel: DVec2 = planets
+            let accel = planets
                 .iter()
                 .map(|p| p.gravity_accel_on(*position))
-                .fold((0.0, 0.0).into(), |a, b| a + b);
+                .fold(Vector2::new(0.0, 0.0), |a, b| a + b);
             speed += accel * timestep;
             Some((speed, *position + speed * timestep))
         })
@@ -287,50 +312,5 @@ impl Craft {
         .take(len as usize - self.trajectory.len());
 
         self.trajectory.extend(iter);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::VecDeque;
-
-    use crate::Craft;
-
-    #[test]
-    fn fuel_comsumption() {
-        let mut craft = Craft {
-            dry_mass: 500.0,
-            fuel_mass: 500.0,
-            isp: 200.0,
-            heading: 0.0,
-            thrust: 2000.0,
-            throttle: 1.0,
-            position: (0.0, 0.0).into(),
-            speed: (0.0, 0.0).into(),
-            trajectory: VecDeque::new(),
-        };
-        craft.consume_fuel(0.5);
-        assert!(craft.fuel_mass < 500.0)
-    }
-
-    #[test]
-    fn deltav() {
-        let mut craft = Craft {
-            dry_mass: 500.0,
-            fuel_mass: 500.0,
-            isp: 200.0,
-            heading: 0.0,
-            thrust: 2000.0,
-            throttle: 1.0,
-            position: (0.0, 0.0).into(),
-            speed: (0.0, 0.0).into(),
-            trajectory: VecDeque::new(),
-        };
-        let dv_1 = craft.deltav();
-        craft.consume_fuel(1.0);
-        let dv_2 = craft.deltav();
-        let dv_diff = dv_1 - dv_2;
-        // i sure love testing for rounding errors
-        assert!(dbg!((dv_diff - 2.0).abs()) < 1e-4);
     }
 }

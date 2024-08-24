@@ -24,7 +24,8 @@ console_error_panic_hook = { version = "0.1.6", optional = true }
 # allocator, however.
 wee_alloc = { version = "0.4.5", optional = true }
 web-sys = { version = "0.3.60", features = ["console"] }
-glam = "0.21"
+nalgebra = "0.33.0"
+js-sys = "0.3.70"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.13"
